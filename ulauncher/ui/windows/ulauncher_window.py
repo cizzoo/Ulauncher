@@ -16,6 +16,8 @@ from ulauncher.utils.load_icon_surface import load_icon_surface
 from ulauncher.utils.settings import Settings
 from ulauncher.utils.theme import Theme
 from ulauncher.utils.wm import get_monitor
+from ulauncher.utils.history import CommandHistory
+import time
 
 logger = logging.getLogger()
 events = EventBus()
@@ -30,6 +32,9 @@ class UlauncherWindow(Gtk.ApplicationWindow):
     core = UlauncherCore()
 
     def __init__(self, **kwargs: Any) -> None:  # noqa: PLR0915
+        self.history = CommandHistory()
+        self.is_history_search = False
+
         logger.info("Opening Ulauncher window")
         width_request = int(self.settings.base_width)
         height_request = -1
@@ -217,6 +222,10 @@ class UlauncherWindow(Gtk.ApplicationWindow):
         """
         Triggered by user input
         """
+        if self.is_history_search:
+            self.update_history_results()
+            return
+
         events.emit("app:set_query", self.prompt_input.get_text(), update_input=False)
         self.core.set_query(self.query_str, self.show_results)
 
@@ -224,6 +233,25 @@ class UlauncherWindow(Gtk.ApplicationWindow):
         """
         Activate the selected result
         """
+        if self.query_str:
+            self.history.add(self.query_str)
+
+        if self.is_history_search:
+            if self._results_nav and (result := self._results_nav.get_active_result()):
+                self.is_history_search = False
+
+                current_text = self.prompt_input.get_text()
+                new_text = result.name
+
+                self.set_input(new_text)
+
+                # If the text didn't change (e.g. you typed the full command and hit Enter),
+                # Gtk.Entry won't emit the 'changed' signal, just trigger it manually
+                # to exit history mode and show the actual app results.
+                if current_text == new_text:
+                    self.on_input_changed()
+            return
+
         if self._results_nav and (result := self._results_nav.get_active_result()):
             if not alt:
                 self._results_nav.remember_result_for_query(str(self.core.query), result)
@@ -264,12 +292,21 @@ class UlauncherWindow(Gtk.ApplicationWindow):
         ):
             return True
 
+        # Toggle history search mode
+        if ctrl and keyname == "r":
+            self.is_history_search = not self.is_history_search
+            if self.is_history_search:
+                self.update_history_results()
+            else:
+                self.on_input_changed()  # Restore normal results
+            return True
+
         if self._results_nav:
-            if keyname in ("Up", "ISO_Left_Tab") or (ctrl and keyname == up_alias):
+            if (keyname in ("Up", "ISO_Left_Tab") and not alt) or (ctrl and keyname == up_alias) :
                 self._results_nav.go_up()
                 return True
 
-            if keyname in ("Down", "Tab") or (ctrl and keyname == down_alias):
+            if (keyname in ("Down", "Tab") and not alt) or (ctrl and keyname == down_alias):
                 self._results_nav.go_down()
                 return True
 
@@ -286,6 +323,34 @@ class UlauncherWindow(Gtk.ApplicationWindow):
                 return True
             if alt and event.string in jump_keys:
                 self.select_result(jump_keys.index(event.string))
+                return True
+
+        current_text = entry_widget.get_text()
+        is_browsing_history = not current_text or self.history.current_match(
+            current_text
+        ) # User is browsing history only if: the input is empty or matches the current history item
+
+        if is_browsing_history:
+            if not current_text and self.history.index != len(self.history.items):
+                if self.history.index < len(self.history.items):
+                    pass  # TODO: I should handle better this case? For now do nothing
+
+                if not self.history.current_match(current_text):
+                    self.history.reset_index()
+
+            if keyname == "Up" and alt:
+                cmd = self.history.prev()
+                if cmd is not None:
+                    self.set_input(cmd)
+                    # Move cursor to end
+                    entry_widget.set_position(-1)
+                return True
+
+            if keyname == "Down" and alt:
+                cmd = self.history.next()
+                if cmd is not None:
+                    self.set_input(cmd)
+                    entry_widget.set_position(-1)
                 return True
         return False
 
@@ -392,6 +457,34 @@ class UlauncherWindow(Gtk.ApplicationWindow):
     def set_input(self, query_str: str) -> None:
         self.prompt_input.set_text(query_str)
         self.prompt_input.set_position(-1)
+
+    def update_history_results(self) -> None:
+        """
+        Filter and display history results based on current input
+        """
+        query = self.prompt_input.get_text().lower()
+        results = []
+
+        # Sort by timestamp descending (Newest first)
+        sorted_items = sorted(
+            self.history.items, key=lambda x: x["timestamp"], reverse=True
+        )
+
+        for item in sorted_items:
+            if query in item["query"].lower():
+                dt = time.strftime("%Y-%m-%d %H:%M", time.localtime(item["timestamp"]))
+                results.append(
+                    Result(
+                        name=item["query"],
+                        description=f"History • {dt}",
+                        icon="system-search",  # Uses standard system search icon
+                        actions={},  # Handled manually in activate_result
+                    )
+                )
+
+        # If no history matches, maybe show a "No history found" placeholder?
+        # For now, just show the empty list (or list of matches)
+        self.show_results(results)
 
     def show_results(self, results: Iterable[Result]) -> None:
         self._results_nav = None
