@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Iterable
 
 from gi.repository import Gdk, GLib, Gtk
@@ -12,12 +13,11 @@ from ulauncher.ui import layer_shell
 from ulauncher.ui.item_navigation import ItemNavigation
 from ulauncher.utils.environment import DESKTOP_ID, IS_X11_COMPATIBLE
 from ulauncher.utils.eventbus import EventBus
+from ulauncher.utils.history import CommandHistory
 from ulauncher.utils.load_icon_surface import load_icon_surface
 from ulauncher.utils.settings import Settings
 from ulauncher.utils.theme import Theme
 from ulauncher.utils.wm import get_monitor
-from ulauncher.utils.history import CommandHistory
-import time
 
 logger = logging.getLogger()
 events = EventBus()
@@ -302,7 +302,7 @@ class UlauncherWindow(Gtk.ApplicationWindow):
             return True
 
         if self._results_nav:
-            if (keyname in ("Up", "ISO_Left_Tab") and not alt) or (ctrl and keyname == up_alias) :
+            if (keyname in ("Up", "ISO_Left_Tab") and not alt) or (ctrl and keyname == up_alias):
                 self._results_nav.go_up()
                 return True
 
@@ -328,7 +328,7 @@ class UlauncherWindow(Gtk.ApplicationWindow):
         current_text = entry_widget.get_text()
         is_browsing_history = not current_text or self.history.current_match(
             current_text
-        ) # User is browsing history only if: the input is empty or matches the current history item
+        )  # User is browsing history only if: the input is empty or matches the current history item
 
         if is_browsing_history:
             if not current_text and self.history.index != len(self.history.items):
@@ -466,9 +466,7 @@ class UlauncherWindow(Gtk.ApplicationWindow):
         results = []
 
         # Sort by timestamp descending (Newest first)
-        sorted_items = sorted(
-            self.history.items, key=lambda x: x["timestamp"], reverse=True
-        )
+        sorted_items = sorted(self.history.items, key=lambda x: x["timestamp"], reverse=True)
 
         for item in sorted_items:
             if query in item["query"].lower():
